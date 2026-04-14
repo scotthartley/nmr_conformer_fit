@@ -234,6 +234,9 @@ def output(
         print(f"{lbl:<{col_w}}  {exp:>10.4f}  {p:>10.4f}  {r:>10.4f}")
 
     print()
+    print(f"Sum squared residuals: {np.sum(resid**2):.6f}")
+
+    print()
     print("Optimized conformer weights:")
     name_w = max(len(n) for n in conformer_names)
 
