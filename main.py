@@ -165,6 +165,48 @@ def optimize(
     return constrained_weights(results.x, fix_weight)
 
 
+def bootstrap(
+    shieldings: np.ndarray,
+    exp_shifts: np.ndarray,
+    residuals: np.ndarray,
+    conf_int: float = 0.95,
+    iterations: int = 1000
+) -> list(tuple[float, float]):
+    """Determine the uncertainty in the weights using a non-parametric
+    bootstrapping method. Runs iterations simulations on datasets that
+    have been perturbed by the residuals, storing the weights. For each
+    weight, the results are ranked and the bottom and top values of the
+    confidence interval selected.
+
+    Args:
+        shieldings: (l, m) array of isotropic shieldings
+        exp_shifts: (l,) array of experimental chemical shifts
+        residuals: (l,) array of residuals from the optimization
+        conf_int: confidence interval for the analysis
+        iterations: number of bootstrapping iterations to run
+    """
+    num_weights = shieldings.shape[1]
+    num_shifts = len(exp_shifts)
+    interval = round((iterations - conf_int * iterations)/2)
+
+
+    all_weights = []
+    for n in range(iterations):
+        random_residuals = np.random.choice(residuals, num_shifts)
+        perturbed_shifts = exp_shifts + random_residuals
+        weights = optimize(shieldings, perturbed_shifts)
+        all_weights.append(weights)
+    all_weights_arr = np.array(all_weights)
+
+    conf_ints = []
+    for i in range(num_weights):
+        variation = all_weights_arr[:, i]
+        variation.sort()
+        conf_ints.append((variation[interval], variation[iterations - interval]))
+
+    return conf_ints
+
+
 def output(
     labels: list[str],
     conformer_names: list[str],
@@ -176,7 +218,7 @@ def output(
     """
     weights = optimize(shieldings, exp_shifts)
     pred = scaled_shifts(weights, shieldings, exp_shifts)
-    resid = pred - exp_shifts
+    resid = exp_shifts - pred
 
     col_w = max(len(lbl) for lbl in labels)
     header = f"{'Proton':<{col_w}}  {'Exp shift':>10}  {'Pred shift':>10}  {'Residual':>10}"
@@ -185,16 +227,24 @@ def output(
     for lbl, exp, p, r in zip(labels, exp_shifts, pred, resid):
         print(f"{lbl:<{col_w}}  {exp:>10.4f}  {p:>10.4f}  {r:>10.4f}")
 
+    # Determine errors by bootstrapping
+    conf_ints = bootstrap(
+        shieldings,
+        exp_shifts,
+        resid
+    )
+
     print()
     print("Optimised conformer weights:")
     name_w = max(len(n) for n in conformer_names)
-    for name, w in zip(conformer_names, weights):
-        print(f"  {name:<{name_w}}  {w:.6f}")
+    for name, w, ci in zip(conformer_names, weights, conf_ints):
+        print(f"  {name:<{name_w}}  {w:.6f} bottom: {ci[0]:.6f} top: {ci[1]:.6f}")
 
-    # Assess errors
+    # Assess variation in SSR for each parameter
     for index in range(len(weights)):
-        print(f"Variation in {labels[index]}:")
-        for val in np.linspace(0.0, 1.0, 11):
+        print()
+        print(f"Variation in {conformer_names[index]}:")
+        for val in np.linspace(0.0, 1.0, 21):
             new_weights = optimize(
                 shieldings,
                 exp_shifts,
@@ -203,8 +253,7 @@ def output(
             new_pred = scaled_shifts(new_weights, shieldings, exp_shifts)
             new_residuals = new_pred - exp_shifts
             ss_residuals = np.sum(new_residuals**2)
-            print(f"{val} {ss_residuals}")
-        print()
+            print(f"{val:.6f} {ss_residuals:.6f}")
 
 
 def main() -> None:
