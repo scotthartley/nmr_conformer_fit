@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import csv
 import math
 
@@ -272,18 +273,27 @@ def main() -> None:
     parser.add_argument("-c", "--conf", help="Confidence interval", type=float, default=0.95)
     parser.add_argument("-b", "--boot", help="Bootstrap iterations", type=int)
     parser.add_argument("-v", "--fixedweight", help="Variation of parameter analysis")
+    parser.add_argument("-w", "--write", help="Write output to file", metavar="filename")
     args = parser.parse_args()
 
     labels, conformer_names, shieldings, exp_shifts = read_csv(args.csv_file)
-    output(
-        labels,
-        conformer_names,
-        shieldings,
-        exp_shifts,
-        args.conf,
-        args.boot,
-        args.fixedweight
-    )
+
+    def run_output():
+        output(
+            labels,
+            conformer_names,
+            shieldings,
+            exp_shifts,
+            args.conf,
+            args.boot,
+            args.fixedweight
+        )
+
+    if args.write:
+        with open(args.write, "w") as f, contextlib.redirect_stdout(f):
+            run_output()
+    else:
+        run_output()
 
 
 if __name__ == "__main__":
