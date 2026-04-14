@@ -1,5 +1,6 @@
 import argparse
 import csv
+import math
 
 import numpy as np
 from scipy import stats
@@ -187,7 +188,7 @@ def bootstrap(
     """
     num_weights = shieldings.shape[1]
     num_shifts = len(exp_shifts)
-    interval = round((iterations - conf_int * iterations)/2)
+    interval = math.ceil((iterations - conf_int * iterations)/2)
 
 
     all_weights = []
@@ -212,9 +213,13 @@ def output(
     conformer_names: list[str],
     shieldings: np.ndarray,
     exp_shifts: np.ndarray,
+    ci: float = 0.95,
+    boot: int = None,
+    fixed_weight_analysis: bool = False
 ) -> None:
-    """Run optimization, print a summary table, print per-conformer weights,
-    assess uncertainties.
+    """Run optimization, print a summary table, run bootstrapping
+    analysis, print per-conformer weights, assess effect of variation of
+    parameters.
     """
     weights = optimize(shieldings, exp_shifts)
     pred = scaled_shifts(weights, shieldings, exp_shifts)
@@ -227,33 +232,36 @@ def output(
     for lbl, exp, p, r in zip(labels, exp_shifts, pred, resid):
         print(f"{lbl:<{col_w}}  {exp:>10.4f}  {p:>10.4f}  {r:>10.4f}")
 
-    # Determine errors by bootstrapping
-    conf_ints = bootstrap(
-        shieldings,
-        exp_shifts,
-        resid
-    )
-
     print()
     print("Optimised conformer weights:")
     name_w = max(len(n) for n in conformer_names)
-    for name, w, ci in zip(conformer_names, weights, conf_ints):
-        print(f"  {name:<{name_w}}  {w:.6f} bottom: {ci[0]:.6f} top: {ci[1]:.6f}")
+
+    # Determine errors by bootstrapping
+    if boot:
+        conf_ints = bootstrap(shieldings, exp_shifts, resid, conf_int = ci, iterations=boot)
+        bot_label = f"bottom {(1-ci)/2*100:.1f}%:"
+        top_label = f"top {100-(1-ci)/2*100:.1f}%:"
+        for name, w, ci in zip(conformer_names, weights, conf_ints):
+            print(f"  {name:<{name_w}}  {w:.6f} {bot_label} {ci[0]:.6f} {top_label} {ci[1]:.6f}")
+    else:
+        for name, w in zip(conformer_names, weights):
+            print(f"  {name:<{name_w}}  {w:.6f}")
 
     # Assess variation in SSR for each parameter
-    for index in range(len(weights)):
-        print()
-        print(f"Variation in {conformer_names[index]}:")
-        for val in np.linspace(0.0, 1.0, 21):
-            new_weights = optimize(
-                shieldings,
-                exp_shifts,
-                fix_weight = (index, val)
-            )
-            new_pred = scaled_shifts(new_weights, shieldings, exp_shifts)
-            new_residuals = new_pred - exp_shifts
-            ss_residuals = np.sum(new_residuals**2)
-            print(f"{val:.6f} {ss_residuals:.6f}")
+    if fixed_weight_analysis:
+        for index in range(len(weights)):
+            print()
+            print(f"Variation in {conformer_names[index]}:")
+            for val in np.linspace(0.0, 1.0, 21):
+                new_weights = optimize(
+                    shieldings,
+                    exp_shifts,
+                    fix_weight = (index, val)
+                )
+                new_pred = scaled_shifts(new_weights, shieldings, exp_shifts)
+                new_residuals = new_pred - exp_shifts
+                ss_residuals = np.sum(new_residuals**2)
+                print(f"{val:.6f} {ss_residuals:.6f}")
 
 
 def main() -> None:
@@ -261,10 +269,21 @@ def main() -> None:
         description="Fit conformer populations to NMR chemical shifts."
     )
     parser.add_argument("csv_file", help="Path to input CSV file")
+    parser.add_argument("-c", "--conf", help="Confidence interval", type=float)
+    parser.add_argument("-b", "--boot", help="Bootstrap iterations", type=int)
+    parser.add_argument("-v", "--fixedweight", help="Variation of parameter analysis")
     args = parser.parse_args()
 
     labels, conformer_names, shieldings, exp_shifts = read_csv(args.csv_file)
-    output(labels, conformer_names, shieldings, exp_shifts)
+    output(
+        labels,
+        conformer_names,
+        shieldings,
+        exp_shifts,
+        args.conf,
+        args.boot,
+        args.fixedweight
+    )
 
 
 if __name__ == "__main__":
