@@ -84,25 +84,39 @@ def scaled_shifts(
     return (net_isotropic_shieldings - reg.intercept) / reg.slope
 
 
-def constrained_weights(weights: np.ndarray) -> np.ndarray:
+def constrained_weights(
+    weights: np.ndarray,
+    fix_weight: tuple[int, float]
+) -> np.ndarray:
     """Convert unconstrained weights to weights that must sum to 1. Based on
     the softmax function.
 
     Args:
-        weights:   (m,) weight vector
+        weights: (m,) weight vector
+        fix_weight: tuple of (index, weight) to hold fixed
 
     Returns:
         (1,) array of normalized weights
     """
+    if fix_weight:
+        weights = np.delete(weights, fix_weight[0])
+        weight_sum = 1.0 - fix_weight[1]
+        e_x = np.exp(weights - np.max(weights))
+        new_weights = weight_sum * e_x / e_x.sum()
+        new_weights = np.insert(new_weights, fix_weight[0], fix_weight[1])
+    else:
+        weight_sum = 1.0
+        e_x = np.exp(weights - np.max(weights))
+        new_weights = weight_sum * e_x / e_x.sum()
 
-    e_x = np.exp(weights - np.max(weights))
-    return e_x / e_x.sum()
+    return new_weights
 
 
 def residuals(
     weights: np.ndarray,
     shieldings: np.ndarray,
     exp_shifts: np.ndarray,
+    fix_weight: tuple[int, float] = None
 ) -> np.ndarray:
     """Compute per-proton residuals (predicted - experimental).
 
@@ -110,31 +124,45 @@ def residuals(
         weights:    (m,) weight vector
         shieldings: (l, m) array of isotropic shieldings
         exp_shifts: (l,) array of experimental chemical shifts
+        fix_weight: tuple of (index, weight) to hold fixed
 
     Returns:
         (l,) array of residuals (predicted_shift - exp_shift) for each proton
     """
-    pred_shifts = scaled_shifts(constrained_weights(weights), shieldings, exp_shifts)
+    pred_shifts = scaled_shifts(
+        constrained_weights(weights, fix_weight),
+        shieldings,
+        exp_shifts
+    )
 
     return pred_shifts - exp_shifts
 
 
-def optimize(shieldings: np.ndarray, exp_shifts: np.ndarray) -> np.ndarray:
+def optimize(
+    shieldings: np.ndarray,
+    exp_shifts: np.ndarray,
+    fix_weight: tuple[int, float] = None
+) -> np.ndarray:
     """Find the conformer weight vector that minimizes the sum of squared residuals.
 
     Args:
         shieldings: (l, m) array of isotropic shieldings
         exp_shifts: (l,) array of experimental chemical shifts
+        fix_weight: tuple of (index, weight) to hold fixed
 
     Returns:
         (m,) array of optimised conformer weights
     """
     num_conformers = shieldings.shape[1]
-    initial_guess = np.full(num_conformers, 1)
+    initial_guess = np.full(num_conformers, 1.0)
 
-    results = least_squares(residuals, initial_guess, args=(shieldings, exp_shifts))
+    results = least_squares(
+        residuals,
+        initial_guess,
+        args = (shieldings, exp_shifts, fix_weight)
+    )
 
-    return constrained_weights(results.x)
+    return constrained_weights(results.x, fix_weight)
 
 
 def output(
@@ -143,10 +171,12 @@ def output(
     shieldings: np.ndarray,
     exp_shifts: np.ndarray,
 ) -> None:
-    """Run optimization, print a summary table, and print per-conformer weights."""
+    """Run optimization, print a summary table, print per-conformer weights,
+    assess uncertainties.
+    """
     weights = optimize(shieldings, exp_shifts)
     pred = scaled_shifts(weights, shieldings, exp_shifts)
-    resid = residuals(weights, shieldings, exp_shifts)
+    resid = pred - exp_shifts
 
     col_w = max(len(lbl) for lbl in labels)
     header = f"{'Proton':<{col_w}}  {'Exp shift':>10}  {'Pred shift':>10}  {'Residual':>10}"
@@ -160,6 +190,21 @@ def output(
     name_w = max(len(n) for n in conformer_names)
     for name, w in zip(conformer_names, weights):
         print(f"  {name:<{name_w}}  {w:.6f}")
+
+    # Assess errors
+    for index in range(len(weights)):
+        print(f"Variation in {labels[index]}:")
+        for val in np.linspace(0.0, 1.0, 11):
+            new_weights = optimize(
+                shieldings,
+                exp_shifts,
+                fix_weight = (index, val)
+            )
+            new_pred = scaled_shifts(new_weights, shieldings, exp_shifts)
+            new_residuals = new_pred - exp_shifts
+            ss_residuals = np.sum(new_residuals**2)
+            print(f"{val} {ss_residuals}")
+        print()
 
 
 def main() -> None:
