@@ -97,7 +97,7 @@ def constrained_weights(
         fix_weight: tuple of (index, weight) to hold fixed
 
     Returns:
-        (1,) array of normalized weights
+        (m,) array of normalized weights
     """
     if fix_weight:
         weights = np.delete(weights, fix_weight[0])
@@ -172,7 +172,7 @@ def bootstrap(
     residuals: np.ndarray,
     conf_int: float = 0.95,
     iterations: int = 1000
-) -> list(tuple[float, float]):
+) -> list[tuple[float, float]]:
     """Determine the uncertainty in the weights using a non-parametric
     bootstrapping method. Runs iterations simulations on datasets that
     have been perturbed by the residuals, storing the weights. For each
@@ -233,7 +233,7 @@ def output(
         print(f"{lbl:<{col_w}}  {exp:>10.4f}  {p:>10.4f}  {r:>10.4f}")
 
     print()
-    print("Optimised conformer weights:")
+    print("Optimized conformer weights:")
     name_w = max(len(n) for n in conformer_names)
 
     # Determine errors by bootstrapping
@@ -241,8 +241,8 @@ def output(
         conf_ints = bootstrap(shieldings, exp_shifts, resid, conf_int = ci, iterations=boot)
         bot_label = f"bottom {(1-ci)/2*100:.1f}%:"
         top_label = f"top {100-(1-ci)/2*100:.1f}%:"
-        for name, w, ci in zip(conformer_names, weights, conf_ints):
-            print(f"  {name:<{name_w}}  {w:.6f} {bot_label} {ci[0]:.6f} {top_label} {ci[1]:.6f}")
+        for name, w, rng in zip(conformer_names, weights, conf_ints):
+            print(f"  {name:<{name_w}}  {w:.6f}   {bot_label} {rng[0]:.6f}   {top_label} {rng[1]:.6f}")
     else:
         for name, w in zip(conformer_names, weights):
             print(f"  {name:<{name_w}}  {w:.6f}")
@@ -269,7 +269,7 @@ def main() -> None:
         description="Fit conformer populations to NMR chemical shifts."
     )
     parser.add_argument("csv_file", help="Path to input CSV file")
-    parser.add_argument("-c", "--conf", help="Confidence interval", type=float)
+    parser.add_argument("-c", "--conf", help="Confidence interval", type=float, default=0.95)
     parser.add_argument("-b", "--boot", help="Bootstrap iterations", type=int)
     parser.add_argument("-v", "--fixedweight", help="Variation of parameter analysis")
     args = parser.parse_args()
