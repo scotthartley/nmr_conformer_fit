@@ -1,0 +1,154 @@
+import argparse
+import csv
+
+import numpy as np
+
+
+def read_csv(filepath: str) -> tuple[list[str], list[str], np.ndarray, np.ndarray]:
+    """Parse a CSV file containing NMR shieldings and experimental shifts.
+
+    Expected format:
+        Column 0:       proton label
+        Columns 1..k-1: shielding values for each conformer (headers = conformer names)
+        Column k:       empty (blank separator)
+        Column k+1:     experimental chemical shift
+
+    Returns:
+        labels:          list of proton label strings, length l
+        conformer_names: list of conformer name strings, length m
+        shieldings:      np.ndarray of shape (l, m)
+        exp_shifts:      np.ndarray of shape (l,)
+    """
+    with open(filepath, newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+
+    # Detect blank separator column: first empty cell after column 0
+    blank_col = None
+    for i, cell in enumerate(header):
+        if i > 0 and cell.strip() == "":
+            blank_col = i
+            break
+    if blank_col is None:
+        raise ValueError(
+            "Could not find blank separator column in CSV header. "
+            "Expected an empty column between shielding columns and experimental shifts."
+        )
+
+    conformer_names = [h.strip() for h in header[1:blank_col]]
+    m = len(conformer_names)
+    if m == 0:
+        raise ValueError("No conformer columns found before the blank separator column.")
+
+    labels: list[str] = []
+    shielding_rows: list[list[float]] = []
+    exp_shift_list: list[float] = []
+
+    with open(filepath, newline="") as f:
+        reader = csv.reader(f)
+        next(reader)  # skip header
+        for row_num, row in enumerate(reader, start=2):
+            if not any(cell.strip() for cell in row):
+                continue  # skip blank rows
+            labels.append(row[0].strip())
+            shielding_rows.append([float(row[i]) for i in range(1, blank_col)])
+            exp_shift_list.append(float(row[blank_col + 1]))
+
+    shieldings = np.array(shielding_rows)   # shape (l, m)
+    exp_shifts = np.array(exp_shift_list)   # shape (l,)
+    return labels, conformer_names, shieldings, exp_shifts
+
+
+def predicted_shifts(
+    weights: np.ndarray,
+    shieldings: np.ndarray,
+    exp_shifts: np.ndarray,
+) -> np.ndarray:
+    """Compute predicted chemical shifts as a weighted average over conformers.
+
+    Args:
+        weights:    (m,) weight vector; weights should sum to 1 and each be >= 0
+        shieldings: (l, m) array of isotropic shieldings; rows = protons, cols = conformers
+        exp_shifts: (l,) array of experimental chemical shifts (unused here; reserved
+                    for future slope/intercept linear correction)
+
+    Returns:
+        (l,) array of predicted chemical shifts
+    """
+    raise NotImplementedError
+
+
+def residuals(
+    weights: np.ndarray,
+    shieldings: np.ndarray,
+    exp_shifts: np.ndarray,
+) -> np.ndarray:
+    """Compute per-proton residuals (predicted - experimental).
+
+    Args:
+        weights:    (m,) weight vector; weights should sum to 1 and each be >= 0
+        shieldings: (l, m) array of isotropic shieldings
+        exp_shifts: (l,) array of experimental chemical shifts
+
+    Returns:
+        (l,) array of residuals (predicted_shift - exp_shift) for each proton
+    """
+    raise NotImplementedError
+
+
+def optimize(shieldings: np.ndarray, exp_shifts: np.ndarray) -> np.ndarray:
+    """Find the conformer weight vector that minimizes the sum of squared residuals.
+
+    Uses scipy.optimize.minimize with:
+        - Equality constraint: sum(weights) == 1  (Boltzmann population normalisation)
+        - Bounds: weights[j] >= 0 for all j       (non-negative populations)
+        - Initial guess: uniform weights 1/m
+
+    Args:
+        shieldings: (l, m) array of isotropic shieldings
+        exp_shifts: (l,) array of experimental chemical shifts
+
+    Returns:
+        (m,) array of optimised conformer weights
+    """
+    raise NotImplementedError
+
+
+def output(
+    labels: list[str],
+    conformer_names: list[str],
+    shieldings: np.ndarray,
+    exp_shifts: np.ndarray,
+) -> None:
+    """Run optimization, print a summary table, and print per-conformer weights."""
+    weights = optimize(shieldings, exp_shifts)
+    pred = predicted_shifts(weights, shieldings, exp_shifts)
+    resid = residuals(weights, shieldings, exp_shifts)
+
+    col_w = max(len(lbl) for lbl in labels)
+    header = f"{'Proton':<{col_w}}  {'Exp shift':>10}  {'Pred shift':>10}  {'Residual':>10}"
+    print(header)
+    print("-" * len(header))
+    for lbl, exp, p, r in zip(labels, exp_shifts, pred, resid):
+        print(f"{lbl:<{col_w}}  {exp:>10.4f}  {p:>10.4f}  {r:>10.4f}")
+
+    print()
+    print("Optimised conformer weights:")
+    name_w = max(len(n) for n in conformer_names)
+    for name, w in zip(conformer_names, weights):
+        print(f"  {name:<{name_w}}  {w:.6f}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Fit conformer populations to NMR chemical shifts."
+    )
+    parser.add_argument("csv_file", help="Path to input CSV file")
+    args = parser.parse_args()
+
+    labels, conformer_names, shieldings, exp_shifts = read_csv(args.csv_file)
+    output(labels, conformer_names, shieldings, exp_shifts)
+
+
+if __name__ == "__main__":
+    main()
