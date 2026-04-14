@@ -2,6 +2,8 @@ import argparse
 import csv
 
 import numpy as np
+from scipy import stats
+from scipy.optimize import least_squares
 
 
 def read_csv(filepath: str) -> tuple[list[str], list[str], np.ndarray, np.ndarray]:
@@ -59,7 +61,7 @@ def read_csv(filepath: str) -> tuple[list[str], list[str], np.ndarray, np.ndarra
     return labels, conformer_names, shieldings, exp_shifts
 
 
-def predicted_shifts(
+def scaled_shifts(
     weights: np.ndarray,
     shieldings: np.ndarray,
     exp_shifts: np.ndarray,
@@ -75,7 +77,26 @@ def predicted_shifts(
     Returns:
         (l,) array of predicted chemical shifts
     """
-    raise NotImplementedError
+    net_isotropic_shieldings = shieldings @ weights
+
+    reg = stats.linregress(exp_shifts, net_isotropic_shieldings)
+
+    return (net_isotropic_shieldings - reg.intercept) / reg.slope
+
+
+def constrained_weights(weights: np.ndarray) -> np.ndarray:
+    """Convert unconstrained weights to weights that must sum to 1. Based on
+    the softmax function.
+
+    Args:
+        weights:   (m,) weight vector
+
+    Returns:
+        (1,) array of normalized weights
+    """
+
+    e_x = np.exp(weights - np.max(weights))
+    return e_x / e_x.sum()
 
 
 def residuals(
@@ -86,23 +107,20 @@ def residuals(
     """Compute per-proton residuals (predicted - experimental).
 
     Args:
-        weights:    (m,) weight vector; weights should sum to 1 and each be >= 0
+        weights:    (m,) weight vector
         shieldings: (l, m) array of isotropic shieldings
         exp_shifts: (l,) array of experimental chemical shifts
 
     Returns:
         (l,) array of residuals (predicted_shift - exp_shift) for each proton
     """
-    raise NotImplementedError
+    pred_shifts = scaled_shifts(constrained_weights(weights), shieldings, exp_shifts)
+
+    return pred_shifts - exp_shifts
 
 
 def optimize(shieldings: np.ndarray, exp_shifts: np.ndarray) -> np.ndarray:
     """Find the conformer weight vector that minimizes the sum of squared residuals.
-
-    Uses scipy.optimize.minimize with:
-        - Equality constraint: sum(weights) == 1  (Boltzmann population normalisation)
-        - Bounds: weights[j] >= 0 for all j       (non-negative populations)
-        - Initial guess: uniform weights 1/m
 
     Args:
         shieldings: (l, m) array of isotropic shieldings
@@ -111,7 +129,12 @@ def optimize(shieldings: np.ndarray, exp_shifts: np.ndarray) -> np.ndarray:
     Returns:
         (m,) array of optimised conformer weights
     """
-    raise NotImplementedError
+    num_conformers = shieldings.shape[1]
+    initial_guess = np.full(num_conformers, 1)
+
+    results = least_squares(residuals, initial_guess, args=(shieldings, exp_shifts))
+
+    return constrained_weights(results.x)
 
 
 def output(
@@ -122,7 +145,7 @@ def output(
 ) -> None:
     """Run optimization, print a summary table, and print per-conformer weights."""
     weights = optimize(shieldings, exp_shifts)
-    pred = predicted_shifts(weights, shieldings, exp_shifts)
+    pred = scaled_shifts(weights, shieldings, exp_shifts)
     resid = residuals(weights, shieldings, exp_shifts)
 
     col_w = max(len(lbl) for lbl in labels)
