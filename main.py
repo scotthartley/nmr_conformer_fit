@@ -275,7 +275,11 @@ def main() -> None:
     parser.add_argument("csv_file", help="Path to input CSV file")
     parser.add_argument("-c", "--conf", help="Confidence interval", type=float, default=0.95)
     parser.add_argument("-b", "--boot", help="Bootstrap iterations", type=int)
-    parser.add_argument("-v", "--fixedweight", help="Variation of parameter analysis")
+    parser.add_argument(
+        "-v", "--fixedweight",
+        action="store_true",
+        help="Variation of parameter analysis"
+    )
     parser.add_argument("-w", "--write", help="Write output to file", metavar="filename")
     args = parser.parse_args()
 
